@@ -1,6 +1,6 @@
 # claude-statusline
 
-Configure your Claude Code statusline to shows limits, directory and git info
+Configure your Claude Code statusline to show limits, directory and git info
 
 ![demo](./.github/demo.png)
 
