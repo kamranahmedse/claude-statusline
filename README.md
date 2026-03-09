@@ -26,6 +26,27 @@ On macOS:
 brew install jq
 ```
 
+## Configuration
+
+### Time format
+
+By default, the statusline auto-detects your system locale and uses 24-hour or 12-hour time accordingly. To override, add `timeFormat` to your `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash \"$HOME/.claude/statusline.sh\"",
+    "timeFormat": "24h"
+  }
+}
+```
+
+| Value | Time | Date + Time |
+|-------|------|-------------|
+| `"24h"` | `14:35` | `9 Mar, 14:35` |
+| `"12h"` | `2:35pm` | `Mar 9, 2:35pm` |
+
 ## Uninstall
 
 ```bash

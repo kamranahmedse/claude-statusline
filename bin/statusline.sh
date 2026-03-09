@@ -99,20 +99,37 @@ format_reset_time() {
     epoch=$(iso_to_epoch "$iso_str")
     [ -z "$epoch" ] && return
 
-    case "$style" in
-        time)
-            date -j -r "$epoch" +"%l:%M%p" 2>/dev/null | sed 's/^ //; s/\.//g' | tr '[:upper:]' '[:lower:]' || \
-            date -d "@$epoch" +"%l:%M%P" 2>/dev/null | sed 's/^ //; s/\.//g'
-            ;;
-        datetime)
-            date -j -r "$epoch" +"%b %-d, %l:%M%p" 2>/dev/null | sed 's/  / /g; s/^ //; s/\.//g' | tr '[:upper:]' '[:lower:]' || \
-            date -d "@$epoch" +"%b %-d, %l:%M%P" 2>/dev/null | sed 's/  / /g; s/^ //; s/\.//g'
-            ;;
-        *)
-            date -j -r "$epoch" +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]' || \
-            date -d "@$epoch" +"%b %-d" 2>/dev/null
-            ;;
-    esac
+    if [ "$time_format" = "24h" ]; then
+        case "$style" in
+            time)
+                date -j -r "$epoch" +"%H:%M" 2>/dev/null || \
+                date -d "@$epoch" +"%H:%M" 2>/dev/null
+                ;;
+            datetime)
+                date -j -r "$epoch" +"%-d %b, %H:%M" 2>/dev/null || \
+                date -d "@$epoch" +"%-d %b, %H:%M" 2>/dev/null
+                ;;
+            *)
+                date -j -r "$epoch" +"%-d %b" 2>/dev/null || \
+                date -d "@$epoch" +"%-d %b" 2>/dev/null
+                ;;
+        esac
+    else
+        case "$style" in
+            time)
+                date -j -r "$epoch" +"%l:%M%p" 2>/dev/null | sed 's/^ //; s/\.//g' | tr '[:upper:]' '[:lower:]' || \
+                date -d "@$epoch" +"%l:%M%P" 2>/dev/null | sed 's/^ //; s/\.//g'
+                ;;
+            datetime)
+                date -j -r "$epoch" +"%b %-d, %l:%M%p" 2>/dev/null | sed 's/  / /g; s/^ //; s/\.//g' | tr '[:upper:]' '[:lower:]' || \
+                date -d "@$epoch" +"%b %-d, %l:%M%P" 2>/dev/null | sed 's/  / /g; s/^ //; s/\.//g'
+                ;;
+            *)
+                date -j -r "$epoch" +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]' || \
+                date -d "@$epoch" +"%b %-d" 2>/dev/null
+                ;;
+        esac
+    fi
 }
 
 # ── Extract JSON data ───────────────────────────────────
@@ -136,10 +153,21 @@ else
 fi
 
 thinking_on=false
+time_format=""
 settings_path="$HOME/.claude/settings.json"
 if [ -f "$settings_path" ]; then
     thinking_val=$(jq -r '.alwaysThinkingEnabled // false' "$settings_path" 2>/dev/null)
     [ "$thinking_val" = "true" ] && thinking_on=true
+    time_format=$(jq -r '.statusLine.timeFormat // empty' "$settings_path" 2>/dev/null)
+fi
+
+# Auto-detect from locale if not configured: if %p (AM/PM) is empty, locale uses 24h
+if [ -z "$time_format" ]; then
+    if [ -z "$(date +%p 2>/dev/null)" ]; then
+        time_format="24h"
+    else
+        time_format="12h"
+    fi
 fi
 
 # ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Thinking ──
@@ -308,9 +336,12 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
         extra_bar=$(build_bar "$extra_pct" "$bar_width")
         extra_pct_color=$(color_for_pct "$extra_pct")
 
-        extra_reset=$(date -v+1m -v1d +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
-        if [ -z "$extra_reset" ]; then
-            extra_reset=$(date -d "$(date +%Y-%m-01) +1 month" +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        if [ "$time_format" = "24h" ]; then
+            extra_reset=$(date -v+1m -v1d +"%-d %b" 2>/dev/null)
+            [ -z "$extra_reset" ] && extra_reset=$(date -d "$(date +%Y-%m-01) +1 month" +"%-d %b" 2>/dev/null)
+        else
+            extra_reset=$(date -v+1m -v1d +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+            [ -z "$extra_reset" ] && extra_reset=$(date -d "$(date +%Y-%m-01) +1 month" +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
         fi
 
         extra_col="${white}extra${reset}   ${extra_bar} ${extra_pct_color}\$${extra_used}${dim}/${reset}${white}\$${extra_limit}${reset}"
