@@ -2,7 +2,7 @@
 
 Configure your Claude Code statusline to show limits, directory and git info. Fork of [@kamranahmedse/claude-statusline](https://github.com/kamranahmedse/claude-statusline) with customizable progress bar styles.
 
-![demo](./.github/demo.png)
+![preview](./.github/preview.png)
 
 ## Install
 
@@ -53,6 +53,18 @@ You can also set it via environment variable in your `.zshrc` or `.bashrc`:
 ```bash
 export CLAUDE_STATUSLINE_BAR_STYLE=diamond
 ```
+
+### Color Schemes
+
+Each section uses a distinct color palette for easy visual separation:
+
+| Section | < 50% | 50-70% | 70-90% | > 90% |
+|---------|-------|--------|--------|-------|
+| **Context window** (amber) | Light grey | Amber | Peach | Orange-red |
+| **Current rate** (warm) | Green | Orange | Yellow | Red |
+| **Weekly rate** (cool) | Teal | Sapphire | Mauve | Pink |
+
+Color palettes inspired by [Catppuccin Mocha](https://github.com/catppuccin/catppuccin).
 
 ## Uninstall
 
