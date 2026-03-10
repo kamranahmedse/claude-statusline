@@ -1,9 +1,9 @@
 {
-  "name": "@kamranahmedse/claude-statusline",
-  "version": "1.0.4",
-  "description": "A status line for Claude Code CLI showing model, context usage, rate limits, and more",
+  "name": "@zynoo/claude-statusline",
+  "version": "1.0.0",
+  "description": "A status line for Claude Code CLI showing model, context usage, rate limits, and more (fork with progress bar styles)",
   "bin": {
-    "claude-statusline": "./bin/install.js"
+    "claude-statusline": "bin/install.js"
   },
   "keywords": [
     "claude",
@@ -12,5 +12,5 @@
     "cli"
   ],
   "license": "MIT",
-  "author": "Kamran Ahmed"
+  "author": "zynoo"
 }

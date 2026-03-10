@@ -17,6 +17,16 @@ red='\033[38;2;255;85;85m'
 yellow='\033[38;2;230;200;0m'
 white='\033[38;2;220;220;220m'
 magenta='\033[38;2;180;140;255m'
+# Catppuccin Mocha cool palette (for weekly)
+teal='\033[38;2;148;226;213m'
+sapphire='\033[38;2;116;199;236m'
+mauve='\033[38;2;203;166;247m'
+pink='\033[38;2;245;194;231m'
+# Amber palette (for context window)
+amber_low='\033[38;2;205;214;244m'
+amber_mid='\033[38;2;249;226;175m'
+amber_high='\033[38;2;250;179;135m'
+amber_crit='\033[38;2;239;108;87m'
 dim='\033[2m'
 reset='\033[0m'
 
@@ -36,27 +46,52 @@ format_tokens() {
 
 color_for_pct() {
     local pct=$1
-    if [ "$pct" -ge 90 ]; then printf "$red"
-    elif [ "$pct" -ge 70 ]; then printf "$yellow"
-    elif [ "$pct" -ge 50 ]; then printf "$orange"
-    else printf "$green"
+    local scheme="${2:-warm}"
+    if [ "$scheme" = "cool" ]; then
+        if [ "$pct" -ge 90 ]; then printf "$pink"
+        elif [ "$pct" -ge 70 ]; then printf "$mauve"
+        elif [ "$pct" -ge 50 ]; then printf "$sapphire"
+        else printf "$teal"
+        fi
+    elif [ "$scheme" = "amber" ]; then
+        if [ "$pct" -ge 90 ]; then printf "$amber_crit"
+        elif [ "$pct" -ge 70 ]; then printf "$amber_high"
+        elif [ "$pct" -ge 50 ]; then printf "$amber_mid"
+        else printf "$amber_low"
+        fi
+    else
+        if [ "$pct" -ge 90 ]; then printf "$red"
+        elif [ "$pct" -ge 70 ]; then printf "$yellow"
+        elif [ "$pct" -ge 50 ]; then printf "$orange"
+        else printf "$green"
+        fi
     fi
 }
 
 build_bar() {
     local pct=$1
     local width=$2
+    local scheme="${3:-warm}"
+    local style="${CLAUDE_STATUSLINE_BAR_STYLE:-diamond}"
     [ "$pct" -lt 0 ] 2>/dev/null && pct=0
     [ "$pct" -gt 100 ] 2>/dev/null && pct=100
 
     local filled=$(( pct * width / 100 ))
     local empty=$(( width - filled ))
     local bar_color
-    bar_color=$(color_for_pct "$pct")
+    bar_color=$(color_for_pct "$pct" "$scheme")
+
+    local filled_char empty_char
+    case "$style" in
+        block)   filled_char="█"; empty_char="░" ;;
+        dot)     filled_char="●"; empty_char="○" ;;
+        diamond) filled_char="▰"; empty_char="▱" ;;
+        *)       filled_char="▰"; empty_char="▱" ;;
+    esac
 
     local filled_str="" empty_str=""
-    for ((i=0; i<filled; i++)); do filled_str+="●"; done
-    for ((i=0; i<empty; i++)); do empty_str+="○"; done
+    for ((i=0; i<filled; i++)); do filled_str+="$filled_char"; done
+    for ((i=0; i<empty; i++)); do empty_str+="$empty_char"; done
 
     printf "${bar_color}${filled_str}${dim}${empty_str}${reset}"
 }
@@ -144,7 +179,7 @@ if [ -f "$settings_path" ]; then
 fi
 
 # ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Thinking ──
-pct_color=$(color_for_pct "$pct_used")
+pct_color=$(color_for_pct "$pct_used" "amber")
 cwd=$(echo "$input" | jq -r '.cwd // ""')
 [ -z "$cwd" ] || [ "$cwd" = "null" ] && cwd=$(pwd)
 dirname=$(basename "$cwd")
@@ -296,8 +331,8 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
     seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
     seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
     seven_day_reset=$(format_reset_time "$seven_day_reset_iso" "datetime")
-    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width")
-    seven_day_pct_color=$(color_for_pct "$seven_day_pct")
+    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width" "cool")
+    seven_day_pct_color=$(color_for_pct "$seven_day_pct" "cool")
     seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
 
     rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"

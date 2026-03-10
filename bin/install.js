@@ -97,10 +97,25 @@ function uninstall() {
   console.log();
 }
 
+const VALID_BAR_STYLES = ["diamond", "block", "dot"];
+
+function getArg(name) {
+  const idx = process.argv.indexOf(name);
+  if (idx === -1 || idx + 1 >= process.argv.length) return null;
+  return process.argv[idx + 1];
+}
+
 function run() {
   if (process.argv.includes("--uninstall")) {
     uninstall();
     return;
+  }
+
+  const barStyle = getArg("--bar-style");
+  if (barStyle && !VALID_BAR_STYLES.includes(barStyle)) {
+    fail(`Invalid bar style: ${barStyle}`);
+    log(`  Valid styles: ${VALID_BAR_STYLES.join(", ")}`);
+    process.exit(1);
   }
 
   console.log();
@@ -144,9 +159,10 @@ function run() {
     }
   }
 
+  const stylePrefix = barStyle ? `CLAUDE_STATUSLINE_BAR_STYLE=${barStyle} ` : "";
   const statusLineConfig = {
     type: "command",
-    command: 'bash "$HOME/.claude/statusline.sh"',
+    command: `${stylePrefix}bash "$HOME/.claude/statusline.sh"`,
   };
 
   if (
@@ -161,8 +177,15 @@ function run() {
     success(`Updated ${dim}settings.json${reset} with statusLine config`);
   }
 
+  if (barStyle) {
+    success(`Bar style set to ${dim}${barStyle}${reset}`);
+  }
+
   console.log();
   log(`${green}Done!${reset} Restart Claude Code to see your new status line.`);
+  if (!barStyle) {
+    log(`${dim}Tip: use --bar-style <diamond|block|dot> to change the progress bar style${reset}`);
+  }
   console.log();
 }
 
