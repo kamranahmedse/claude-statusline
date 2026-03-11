@@ -9,6 +9,7 @@ if [ -z "$input" ]; then
 fi
 
 # ── Colors ──────────────────────────────────────────────
+# Default palette (optimized for dark terminals)
 blue='\033[38;2;0;153;255m'
 orange='\033[38;2;255;176;85m'
 green='\033[38;2;0;175;80m'
@@ -19,6 +20,13 @@ white='\033[38;2;220;220;220m'
 magenta='\033[38;2;180;140;255m'
 dim='\033[2m'
 reset='\033[0m'
+
+# User color overrides from config file (survives updates)
+color_config="$HOME/.claude/statusline-colors.sh"
+if [ -f "$color_config" ]; then
+    # shellcheck source=/dev/null
+    source "$color_config"
+fi
 
 sep=" ${dim}│${reset} "
 
