@@ -1,6 +1,6 @@
 {
   "name": "@zynoo/claude-statusline",
-  "version": "1.0.1",
+  "version": "1.2.1",
   "description": "A status line for Claude Code CLI showing model, context usage, rate limits, and more (fork with progress bar styles)",
   "bin": {
     "claude-statusline": "bin/install.js"

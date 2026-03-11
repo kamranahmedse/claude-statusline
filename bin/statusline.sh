@@ -280,7 +280,7 @@ get_oauth_token() {
 
 # ── Fetch usage data (cached) ──────────────────────────
 cache_file="/tmp/claude/statusline-usage-cache.json"
-cache_max_age=60
+cache_max_age=120
 mkdir -p /tmp/claude
 
 needs_refresh=true
