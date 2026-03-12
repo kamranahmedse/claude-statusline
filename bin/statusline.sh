@@ -143,6 +143,18 @@ if [ -f "$settings_path" ]; then
     effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
 fi
 
+# ── YOLO mode detection (--dangerously-skip-permissions) ──
+yolo_mode=false
+pid=$$
+for _i in 1 2 3 4 5; do
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ -z "$pid" ] || [ "$pid" = "0" ] || [ "$pid" = "1" ] && break
+    if ps -o args= -p "$pid" 2>/dev/null | grep -q "dangerously-skip-permissions"; then
+        yolo_mode=true
+        break
+    fi
+done
+
 # ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Thinking ──
 pct_color=$(color_for_pct "$pct_used")
 cwd=$(echo "$input" | jq -r '.cwd // ""')
@@ -194,6 +206,10 @@ case "$effort" in
     low)    line1+="${dim}◔ ${effort}${reset}" ;;
     *)      line1+="${dim}◑ ${effort}${reset}" ;;
 esac
+if $yolo_mode; then
+    line1+="${sep}"
+    line1+="${red}⚠ YOLO${reset}"
+fi
 
 # ── OAuth token resolution ──────────────────────────────
 get_oauth_token() {
