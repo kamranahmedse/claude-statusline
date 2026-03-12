@@ -147,7 +147,15 @@ fi
 pct_color=$(color_for_pct "$pct_used")
 cwd=$(echo "$input" | jq -r '.cwd // ""')
 [ -z "$cwd" ] || [ "$cwd" = "null" ] && cwd=$(pwd)
-dirname=$(basename "$cwd")
+# Show parent/current instead of just basename to avoid ambiguity
+# e.g. "nexus-dashboard/backend" instead of just "backend"
+parent=$(basename "$(command dirname "$cwd")")
+base=$(basename "$cwd")
+if [ "$parent" = "/" ] || [ "$parent" = "." ]; then
+    dirname="$base"
+else
+    dirname="${parent}/${base}"
+fi
 
 git_branch=""
 git_dirty=""
