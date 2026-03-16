@@ -195,6 +195,25 @@ case "$effort" in
     *)      line1+="${dim}◑ ${effort}${reset}" ;;
 esac
 
+# ── 2x usage detection ──────────────────────────────────
+# 2x on weekdays outside 5–11am PT, 2x all day on weekends
+pt_day=$(TZ="America/Los_Angeles" date +%u)   # 1=Mon … 7=Sun
+pt_hour=$(TZ="America/Los_Angeles" date +%-H)
+if [ "$pt_day" -ge 6 ]; then
+    is_2x=true
+elif [ "$pt_hour" -lt 5 ] || [ "$pt_hour" -ge 11 ]; then
+    is_2x=true
+else
+    is_2x=false
+fi
+
+line1+="${sep}"
+if $is_2x; then
+    line1+="${green}2x YES${reset}"
+else
+    line1+="${dim}2x NO${reset}"
+fi
+
 # ── OAuth token resolution ──────────────────────────────
 get_oauth_token() {
     local token=""
