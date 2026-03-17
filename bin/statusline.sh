@@ -63,9 +63,9 @@ color_for_pct() {
     local scheme="${2:-warm}"
     if [ "$scheme" = "cool" ]; then
         if [ "$pct" -ge 90 ]; then printf "$cat_red"
-        elif [ "$pct" -ge 70 ]; then printf "$mauve"
-        elif [ "$pct" -ge 50 ]; then printf "$sapphire"
-        else printf "$teal"
+        elif [ "$pct" -ge 70 ]; then printf "$cat_peach"
+        elif [ "$pct" -ge 50 ]; then printf "$cat_yellow"
+        else printf "$blue"
         fi
     elif [ "$scheme" = "amber" ]; then
         if [ "$pct" -ge 90 ]; then printf "$cat_red"
@@ -77,7 +77,7 @@ color_for_pct() {
         if [ "$pct" -ge 90 ]; then printf "$cat_red"
         elif [ "$pct" -ge 70 ]; then printf "$cat_peach"
         elif [ "$pct" -ge 50 ]; then printf "$cat_yellow"
-        else printf "$sapphire"
+        else printf "$cat_green"
         fi
     fi
 }
@@ -190,11 +190,11 @@ format_remaining() {
     local mins=$(( (remaining % 3600) / 60 ))
 
     if [ "$days" -gt 0 ]; then
-        printf "%dd %dh / %s" "$days" "$hours" "$window"
+        printf "%dd·%dh left" "$days" "$hours"
     elif [ "$hours" -gt 0 ]; then
-        printf "%dh %dm / %s" "$hours" "$mins" "$window"
+        printf "%dh·%dm left" "$hours" "$mins"
     else
-        printf "%dm / %s" "$mins" "$window"
+        printf "%dm left" "$mins"
     fi
 }
 
@@ -218,8 +218,15 @@ else
     pct_used=0
 fi
 
-effort=$(echo "$input" | jq -r '.effortLevel // empty' 2>/dev/null)
-if [ -z "$effort" ] || [ "$effort" = "null" ]; then
+effort=""
+transcript_path=$(echo "$input" | jq -r '.transcript_path // empty' 2>/dev/null)
+if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
+    effort=$(tail -200 "$transcript_path" 2>/dev/null \
+        | grep -o 'with \(low\|medium\|high\|max\) effort' \
+        | tail -1 \
+        | awk '{print $2}')
+fi
+if [ -z "$effort" ]; then
     settings_path="$HOME/.claude/settings.json"
     if [ -f "$settings_path" ]; then
         effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
@@ -260,7 +267,7 @@ if [ -n "$session_start" ] && [ "$session_start" != "null" ]; then
     fi
 fi
 
-line1="${blue}${model_name}${reset}"
+line1="${orange}${model_name}${reset}"
 line1+="${sep}"
 line1+="✍️ ${pct_color}${pct_used}%${reset}"
 line1+="${sep}"
