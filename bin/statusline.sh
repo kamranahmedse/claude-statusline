@@ -100,7 +100,7 @@ build_bar() {
         arrow)   filled_char="▸"; empty_char="▹" ;;
         square)  filled_char="■"; empty_char="□" ;;
         shade)   filled_char="▓"; empty_char="░" ;;
-        solid)   filled_char="█"; empty_char="█" ;;
+        solid)   filled_char="▮"; empty_char="▯" ;;
         *)       filled_char="▰"; empty_char="▱" ;;
     esac
 
@@ -113,12 +113,7 @@ build_bar() {
         empty_color='\033[38;2;55;60;80m'
     fi
 
-    local gap=""
-    if [ "$style" = "solid" ] && [ "$filled" -gt 0 ] && [ "$empty" -gt 0 ]; then
-        gap=" "
-    fi
-
-    printf "${bar_color}${filled_str}${reset}${gap}${empty_color}${empty_str}${reset}"
+    printf "${bar_color}${filled_str}${empty_color}${empty_str}${reset}"
 }
 
 iso_to_epoch() {
@@ -375,7 +370,7 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
     seven_day_pct_color=$(color_for_pct "$seven_day_pct" "cool")
     seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
 
-    rate_lines+="\n\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"
+    rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"
 
     extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
     if [ "$extra_enabled" = "true" ]; then
@@ -391,7 +386,7 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
         fi
 
         extra_col="${white}extra${reset}   ${extra_bar} ${extra_pct_color}\$${extra_used}${dim}/${reset}${white}\$${extra_limit}${reset} ${dim}⟳${reset} ${white}${extra_reset}${reset}"
-        rate_lines+="\n\n${extra_col}"
+        rate_lines+="\n${extra_col}"
     fi
 fi
 
