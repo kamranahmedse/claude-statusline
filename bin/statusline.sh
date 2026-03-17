@@ -222,9 +222,12 @@ effort=""
 transcript_path=$(echo "$input" | jq -r '.transcript_path // empty' 2>/dev/null)
 if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
     effort=$(tail -200 "$transcript_path" 2>/dev/null \
-        | grep -o 'with \(low\|medium\|high\|max\) effort' \
+        | sed 's/\\u001b\[[0-9;]*m//g; s/\\\\//g' \
+        | grep -o 'local-command-stdout>Set model to[^<]*effort' \
         | tail -1 \
-        | awk '{print $2}')
+        | grep -o '\(low\|medium\|high\|max\) effort' \
+        | tail -1 \
+        | awk '{print $1}')
 fi
 if [ -z "$effort" ]; then
     settings_path="$HOME/.claude/settings.json"
