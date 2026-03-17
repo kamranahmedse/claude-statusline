@@ -4,10 +4,14 @@ set -f
 # ── Parse CLI arguments ──────────────────────────────────
 CACHE_TTL=120
 BAR_STYLE=""
+USAGE_STYLE=""
+TIME_STYLE=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --cache-ttl) CACHE_TTL="$2"; shift 2 ;;
         --bar-style) BAR_STYLE="$2"; shift 2 ;;
+        --usage-style) USAGE_STYLE="$2"; shift 2 ;;
+        --time-style) TIME_STYLE="$2"; shift 2 ;;
         *) shift ;;
     esac
 done
@@ -20,24 +24,23 @@ if [ -z "$input" ]; then
 fi
 
 # ── Colors ──────────────────────────────────────────────
-blue='\033[38;2;0;153;255m'
-orange='\033[38;2;255;176;85m'
-green='\033[38;2;0;175;80m'
-cyan='\033[38;2;86;182;194m'
-red='\033[38;2;255;85;85m'
-yellow='\033[38;2;230;200;0m'
-white='\033[38;2;220;220;220m'
-magenta='\033[38;2;180;140;255m'
-# Catppuccin Mocha cool palette (for weekly)
+blue='\033[38;2;137;180;250m'
+orange='\033[38;2;250;179;135m'
+green='\033[38;2;166;227;161m'
+cyan='\033[38;2;137;220;235m'
+red='\033[38;2;243;139;168m'
+yellow='\033[38;2;249;226;175m'
+white='\033[38;2;205;214;244m'
+magenta='\033[38;2;203;166;247m'
+# Catppuccin Mocha palette
 teal='\033[38;2;148;226;213m'
 sapphire='\033[38;2;116;199;236m'
 mauve='\033[38;2;203;166;247m'
 pink='\033[38;2;245;194;231m'
-# Amber palette (for context window)
-amber_low='\033[38;2;205;214;244m'
-amber_mid='\033[38;2;249;226;175m'
-amber_high='\033[38;2;250;179;135m'
-amber_crit='\033[38;2;239;108;87m'
+cat_green='\033[38;2;166;227;161m'
+cat_yellow='\033[38;2;249;226;175m'
+cat_peach='\033[38;2;250;179;135m'
+cat_red='\033[38;2;243;139;168m'
 dim='\033[2m'
 reset='\033[0m'
 
@@ -59,22 +62,22 @@ color_for_pct() {
     local pct=$1
     local scheme="${2:-warm}"
     if [ "$scheme" = "cool" ]; then
-        if [ "$pct" -ge 90 ]; then printf "$pink"
+        if [ "$pct" -ge 90 ]; then printf "$cat_red"
         elif [ "$pct" -ge 70 ]; then printf "$mauve"
         elif [ "$pct" -ge 50 ]; then printf "$sapphire"
         else printf "$teal"
         fi
     elif [ "$scheme" = "amber" ]; then
-        if [ "$pct" -ge 90 ]; then printf "$amber_crit"
-        elif [ "$pct" -ge 70 ]; then printf "$amber_high"
-        elif [ "$pct" -ge 50 ]; then printf "$amber_mid"
-        else printf "$amber_low"
+        if [ "$pct" -ge 90 ]; then printf "$cat_red"
+        elif [ "$pct" -ge 70 ]; then printf "$cat_peach"
+        elif [ "$pct" -ge 50 ]; then printf "$cat_yellow"
+        else printf "$cat_green"
         fi
     else
-        if [ "$pct" -ge 90 ]; then printf "$red"
-        elif [ "$pct" -ge 70 ]; then printf "$yellow"
-        elif [ "$pct" -ge 50 ]; then printf "$orange"
-        else printf "$green"
+        if [ "$pct" -ge 90 ]; then printf "$cat_red"
+        elif [ "$pct" -ge 70 ]; then printf "$cat_peach"
+        elif [ "$pct" -ge 50 ]; then printf "$cat_yellow"
+        else printf "$sapphire"
         fi
     fi
 }
@@ -100,7 +103,6 @@ build_bar() {
         arrow)   filled_char="▸"; empty_char="▹" ;;
         square)  filled_char="■"; empty_char="□" ;;
         shade)   filled_char="▓"; empty_char="░" ;;
-        solid)   filled_char="▮"; empty_char="▯" ;;
         *)       filled_char="▰"; empty_char="▱" ;;
     esac
 
@@ -108,10 +110,7 @@ build_bar() {
     for ((i=0; i<filled; i++)); do filled_str+="$filled_char"; done
     for ((i=0; i<empty; i++)); do empty_str+="$empty_char"; done
 
-    local empty_color="${dim}"
-    if [ "$style" = "solid" ]; then
-        empty_color='\033[38;2;55;60;80m'
-    fi
+    local empty_color='\033[38;2;49;50;68m'
 
     printf "${bar_color}${filled_str}${empty_color}${empty_str}${reset}"
 }
@@ -172,6 +171,33 @@ format_reset_time() {
     printf "%s" "$result"
 }
 
+format_remaining() {
+    local iso_str="$1"
+    local window="$2"
+    [ -z "$iso_str" ] || [ "$iso_str" = "null" ] && return
+
+    local epoch
+    epoch=$(iso_to_epoch "$iso_str")
+    [ -z "$epoch" ] && return
+
+    local now_ts
+    now_ts=$(date +%s)
+    local remaining=$(( epoch - now_ts ))
+    [ "$remaining" -lt 0 ] && remaining=0
+
+    local days=$(( remaining / 86400 ))
+    local hours=$(( (remaining % 86400) / 3600 ))
+    local mins=$(( (remaining % 3600) / 60 ))
+
+    if [ "$days" -gt 0 ]; then
+        printf "%dd %dh / %s" "$days" "$hours" "$window"
+    elif [ "$hours" -gt 0 ]; then
+        printf "%dh %dm / %s" "$hours" "$mins" "$window"
+    else
+        printf "%dm / %s" "$mins" "$window"
+    fi
+}
+
 # ── Extract JSON data ───────────────────────────────────
 model_name=$(echo "$input" | jq -r 'if (.model | type) == "object" then .model.display_name // "Claude" else .model // "Claude" end')
 
@@ -192,10 +218,14 @@ else
     pct_used=0
 fi
 
-effort="default"
-settings_path="$HOME/.claude/settings.json"
-if [ -f "$settings_path" ]; then
-    effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
+effort=$(echo "$input" | jq -r '.effortLevel // empty' 2>/dev/null)
+if [ -z "$effort" ] || [ "$effort" = "null" ]; then
+    settings_path="$HOME/.claude/settings.json"
+    if [ -f "$settings_path" ]; then
+        effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
+    else
+        effort="default"
+    fi
 fi
 
 # ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Thinking ──
@@ -244,10 +274,11 @@ if [ -n "$session_duration" ]; then
 fi
 line1+="${sep}"
 case "$effort" in
+    max)    line1+="${yellow}◉ ${effort}${reset}" ;;
     high)   line1+="${magenta}● ${effort}${reset}" ;;
-    medium) line1+="${dim}◑ ${effort}${reset}" ;;
+    medium) line1+="${sapphire}◑ ${effort}${reset}" ;;
     low)    line1+="${dim}◔ ${effort}${reset}" ;;
-    *)      line1+="${dim}◑ ${effort}${reset}" ;;
+    *)      line1+="${dim}○ ${effort}${reset}" ;;
 esac
 
 # ── OAuth token resolution ──────────────────────────────
@@ -349,49 +380,93 @@ if $needs_refresh; then
 fi
 
 # ── Rate limit lines ────────────────────────────────────
+usage_style="${USAGE_STYLE:-${CLAUDE_STATUSLINE_USAGE_STYLE:-default}}"
+time_style="${TIME_STYLE:-${CLAUDE_STATUSLINE_TIME_STYLE:-remaining}}"
 rate_lines=""
 
 if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
-    bar_width=10
 
     five_hour_pct=$(echo "$usage_data" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
     five_hour_reset_iso=$(echo "$usage_data" | jq -r '.five_hour.resets_at // empty')
-    five_hour_reset=$(format_reset_time "$five_hour_reset_iso" "time")
-    five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
     five_hour_pct_color=$(color_for_pct "$five_hour_pct")
-    five_hour_pct_fmt=$(printf "%3d" "$five_hour_pct")
-
-    rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${five_hour_reset}${reset}"
 
     seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
     seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
-    seven_day_reset=$(format_reset_time "$seven_day_reset_iso" "datetime")
-    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width" "cool")
     seven_day_pct_color=$(color_for_pct "$seven_day_pct" "cool")
-    seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
-
-    rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"
 
     extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
-    if [ "$extra_enabled" = "true" ]; then
-        extra_pct=$(echo "$usage_data" | jq -r '.extra_usage.utilization // 0' | awk '{printf "%.0f", $1}')
-        extra_used=$(echo "$usage_data" | jq -r '.extra_usage.used_credits // 0' | awk '{printf "%.2f", $1/100}')
-        extra_limit=$(echo "$usage_data" | jq -r '.extra_usage.monthly_limit // 0' | awk '{printf "%.2f", $1/100}')
-        extra_bar=$(build_bar "$extra_pct" "$bar_width")
-        extra_pct_color=$(color_for_pct "$extra_pct")
 
-        extra_reset=$(date -v+1m -v1d +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
-        if [ -z "$extra_reset" ]; then
-            extra_reset=$(date -d "$(date +%Y-%m-01) +1 month" +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    if [ "$usage_style" = "compact" ]; then
+        bar_width=12
+
+        five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
+        five_hour_remaining=$(format_remaining "$five_hour_reset_iso" "5h")
+
+        rate_lines="${white}Usage${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct}%${reset}"
+        [ -n "$five_hour_remaining" ] && rate_lines+=" ${dim}(${five_hour_remaining})${reset}"
+
+        seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width" "cool")
+        seven_day_remaining=$(format_remaining "$seven_day_reset_iso" "7d")
+
+        rate_lines+="${sep}${seven_day_bar} ${seven_day_pct_color}${seven_day_pct}%${reset}"
+        [ -n "$seven_day_remaining" ] && rate_lines+=" ${dim}(${seven_day_remaining})${reset}"
+
+        if [ "$extra_enabled" = "true" ]; then
+            extra_pct=$(echo "$usage_data" | jq -r '.extra_usage.utilization // 0' | awk '{printf "%.0f", $1}')
+            extra_used=$(echo "$usage_data" | jq -r '.extra_usage.used_credits // 0' | awk '{printf "%.2f", $1/100}')
+            extra_limit=$(echo "$usage_data" | jq -r '.extra_usage.monthly_limit // 0' | awk '{printf "%.2f", $1/100}')
+            extra_bar=$(build_bar "$extra_pct" "$bar_width")
+            extra_pct_color=$(color_for_pct "$extra_pct")
+            rate_lines+="${sep}${extra_bar} ${extra_pct_color}\$${extra_used}${dim}/${reset}${white}\$${extra_limit}${reset}"
+        fi
+    else
+        bar_width=10
+
+        five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
+        five_hour_pct_fmt=$(printf "%3d" "$five_hour_pct")
+
+        rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset}"
+        if [ "$time_style" = "absolute" ]; then
+            five_hour_reset=$(format_reset_time "$five_hour_reset_iso" "time")
+            rate_lines+=" ${dim}⟳${reset} ${white}${five_hour_reset}${reset}"
+        else
+            five_hour_remaining=$(format_remaining "$five_hour_reset_iso" "5h")
+            [ -n "$five_hour_remaining" ] && rate_lines+=" ${dim}(${five_hour_remaining})${reset}"
         fi
 
-        extra_col="${white}extra${reset}   ${extra_bar} ${extra_pct_color}\$${extra_used}${dim}/${reset}${white}\$${extra_limit}${reset} ${dim}⟳${reset} ${white}${extra_reset}${reset}"
-        rate_lines+="\n${extra_col}"
+        seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width" "cool")
+        seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
+
+        rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset}"
+        if [ "$time_style" = "absolute" ]; then
+            seven_day_reset=$(format_reset_time "$seven_day_reset_iso" "datetime")
+            rate_lines+=" ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"
+        else
+            seven_day_remaining=$(format_remaining "$seven_day_reset_iso" "7d")
+            [ -n "$seven_day_remaining" ] && rate_lines+=" ${dim}(${seven_day_remaining})${reset}"
+        fi
+
+        if [ "$extra_enabled" = "true" ]; then
+            extra_pct=$(echo "$usage_data" | jq -r '.extra_usage.utilization // 0' | awk '{printf "%.0f", $1}')
+            extra_used=$(echo "$usage_data" | jq -r '.extra_usage.used_credits // 0' | awk '{printf "%.2f", $1/100}')
+            extra_limit=$(echo "$usage_data" | jq -r '.extra_usage.monthly_limit // 0' | awk '{printf "%.2f", $1/100}')
+            extra_bar=$(build_bar "$extra_pct" "$bar_width")
+            extra_pct_color=$(color_for_pct "$extra_pct")
+
+            extra_col="${white}extra${reset}   ${extra_bar} ${extra_pct_color}\$${extra_used}${dim}/${reset}${white}\$${extra_limit}${reset}"
+            rate_lines+="\n${extra_col}"
+        fi
     fi
 fi
 
 # ── Output ──────────────────────────────────────────────
 printf "%b" "$line1"
-[ -n "$rate_lines" ] && printf "\n\n%b" "$rate_lines"
+if [ -n "$rate_lines" ]; then
+    if [ "$usage_style" = "compact" ]; then
+        printf "\n%b" "$rate_lines"
+    else
+        printf "\n\n%b" "$rate_lines"
+    fi
+fi
 
 exit 0
