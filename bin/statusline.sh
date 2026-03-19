@@ -147,13 +147,21 @@ fi
 pct_color=$(color_for_pct "$pct_used")
 cwd=$(echo "$input" | jq -r '.cwd // ""')
 [ -z "$cwd" ] || [ "$cwd" = "null" ] && cwd=$(pwd)
-dirname=$(basename "$cwd")
+
+# Use worktree path/branch when running inside a git worktree session
+worktree_path=$(echo "$input" | jq -r '.worktree.path // empty')
+if [ -n "$worktree_path" ] && [ -d "$worktree_path" ]; then
+    git_dir="$worktree_path"
+else
+    git_dir="$cwd"
+fi
+dirname=$(basename "$git_dir")
 
 git_branch=""
 git_dirty=""
-if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git_branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
-    if [ -n "$(git -C "$cwd" status --porcelain 2>/dev/null)" ]; then
+if git -C "$git_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git_branch=$(git -C "$git_dir" symbolic-ref --short HEAD 2>/dev/null)
+    if [ -n "$(git -C "$git_dir" status --porcelain 2>/dev/null)" ]; then
         git_dirty="*"
     fi
 fi
