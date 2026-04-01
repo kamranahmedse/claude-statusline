@@ -109,6 +109,34 @@ format_reset_time() {
             result=$(date -j -r "$epoch" +"%b %-d, %l:%M%p" 2>/dev/null | sed 's/  / /g; s/^ //; s/\.//g' | tr '[:upper:]' '[:lower:]')
             [ -z "$result" ] && result=$(date -d "@$epoch" +"%b %-d, %l:%M%P" 2>/dev/null | sed 's/  / /g; s/^ //; s/\.//g')
             ;;
+        date)
+            result=$(date -j -r "$epoch" +"%a %b %-d %Y" 2>/dev/null)
+            [ -z "$result" ] && result=$(date -d "@$epoch" +"%a %b %-d %Y" 2>/dev/null)
+            ;;
+        relative)
+            local now
+            now=$(date +%s)
+            local diff=$(( epoch - now ))
+            if [ "$diff" -le 0 ]; then
+                result="now"
+            else
+                local days=$(( diff / 86400 ))
+                local hours=$(( (diff % 86400) / 3600 ))
+                local mins=$(( (diff % 3600) / 60 ))
+                result="after "
+                if [ "$days" -gt 0 ]; then
+                    result+="${days}d"
+                    [ "$hours" -gt 0 ] && result+=" ${hours}h"
+                    [ "$mins" -gt 0 ] && result+=" ${mins}mins"
+                elif [ "$hours" -gt 0 ] && [ "$mins" -gt 0 ]; then
+                    result+="${hours}h ${mins}mins"
+                elif [ "$hours" -gt 0 ]; then
+                    result+="${hours}h"
+                else
+                    result+="${mins}mins"
+                fi
+            fi
+            ;;
         *)
             result=$(date -j -r "$epoch" +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
             [ -z "$result" ] && result=$(date -d "@$epoch" +"%b %-d" 2>/dev/null)
@@ -138,9 +166,11 @@ else
 fi
 
 effort="default"
+show_bars_when_unlimited="false"
 settings_path="$HOME/.claude/settings.json"
 if [ -f "$settings_path" ]; then
     effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
+    show_bars_when_unlimited=$(jq -r '.statuslineShowRateBarsWhenUnlimited // false' "$settings_path" 2>/dev/null)
 fi
 
 # ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Thinking ──
@@ -284,39 +314,61 @@ rate_lines=""
 if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
     bar_width=10
 
-    five_hour_pct=$(echo "$usage_data" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
-    five_hour_reset_iso=$(echo "$usage_data" | jq -r '.five_hour.resets_at // empty')
-    five_hour_reset=$(format_reset_time "$five_hour_reset_iso" "time")
-    five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
-    five_hour_pct_color=$(color_for_pct "$five_hour_pct")
-    five_hour_pct_fmt=$(printf "%3d" "$five_hour_pct")
-
-    rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${five_hour_reset}${reset}"
-
-    seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
-    seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
-    seven_day_reset=$(format_reset_time "$seven_day_reset_iso" "datetime")
-    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width")
-    seven_day_pct_color=$(color_for_pct "$seven_day_pct")
-    seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
-
-    rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"
-
     extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
+    extra_unlimited=$(echo "$usage_data" | jq -r '.extra_usage.is_unlimited // false')
+    extra_monthly_limit_raw=$(echo "$usage_data" | jq -r '.extra_usage.monthly_limit')
+    is_unlimited=false
     if [ "$extra_enabled" = "true" ]; then
-        extra_pct=$(echo "$usage_data" | jq -r '.extra_usage.utilization // 0' | awk '{printf "%.0f", $1}')
-        extra_used=$(echo "$usage_data" | jq -r '.extra_usage.used_credits // 0' | awk '{printf "%.2f", $1/100}')
-        extra_limit=$(echo "$usage_data" | jq -r '.extra_usage.monthly_limit // 0' | awk '{printf "%.2f", $1/100}')
-        extra_bar=$(build_bar "$extra_pct" "$bar_width")
-        extra_pct_color=$(color_for_pct "$extra_pct")
+        if [ "$extra_unlimited" = "true" ] || [ "$extra_monthly_limit_raw" = "null" ] || [ "$extra_monthly_limit_raw" = "0" ]; then
+            is_unlimited=true
+        fi
+    fi
 
-        extra_reset=$(date -v+1m -v1d +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
-        if [ -z "$extra_reset" ]; then
-            extra_reset=$(date -d "$(date +%Y-%m-01) +1 month" +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    if [ "$is_unlimited" = "false" ] || [ "$show_bars_when_unlimited" = "true" ]; then
+        five_hour_pct=$(echo "$usage_data" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
+        five_hour_reset_iso=$(echo "$usage_data" | jq -r '.five_hour.resets_at // empty')
+        five_hour_reset=$(format_reset_time "$five_hour_reset_iso" "time")
+        five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
+        five_hour_pct_color=$(color_for_pct "$five_hour_pct")
+        five_hour_pct_fmt=$(printf "%3d" "$five_hour_pct")
+
+        rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${five_hour_reset}${reset}"
+
+        seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
+        seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
+        seven_day_reset=$(format_reset_time "$seven_day_reset_iso" "datetime")
+        seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width")
+        seven_day_pct_color=$(color_for_pct "$seven_day_pct")
+        seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
+
+        rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"
+    fi
+
+    if [ "$extra_enabled" = "true" ]; then
+        extra_used=$(echo "$usage_data" | jq -r '.extra_usage.used_credits // 0' | awk '{printf "%.2f", $1/100}')
+
+        # Calculate reset date: 1st of next month
+        extra_reset_epoch=$(date -v+1m -v1d -v0H -v0M -v0S +%s 2>/dev/null)
+        if [ -z "$extra_reset_epoch" ]; then
+            extra_reset_epoch=$(date -d "$(date +%Y-%m-01) +1 month" +%s 2>/dev/null)
+        fi
+        extra_reset_iso=$(date -j -r "$extra_reset_epoch" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null)
+        [ -z "$extra_reset_iso" ] && extra_reset_iso=$(date -d "@$extra_reset_epoch" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null)
+        extra_reset=$(format_reset_time "$extra_reset_iso" "date")
+
+        if [ "$is_unlimited" = "true" ]; then
+            extra_col="${white}extra${reset}   ${cyan}∞ unlimited${reset}  ${dim}used ${reset}${white}\$${extra_used}${reset}"
+        else
+            extra_pct=$(echo "$usage_data" | jq -r '.extra_usage.utilization // 0' | awk '{printf "%.0f", $1}')
+            extra_limit=$(echo "$extra_monthly_limit_raw" | awk '{printf "%.2f", $1/100}')
+            extra_bar=$(build_bar "$extra_pct" "$bar_width")
+            extra_pct_color=$(color_for_pct "$extra_pct")
+            extra_col="${white}extra${reset}   ${extra_bar} ${extra_pct_color}\$${extra_used}${dim}/${reset}${white}\$${extra_limit}${reset}"
         fi
 
-        extra_col="${white}extra${reset}   ${extra_bar} ${extra_pct_color}\$${extra_used}${dim}/${reset}${white}\$${extra_limit}${reset} ${dim}⟳${reset} ${white}${extra_reset}${reset}"
+        extra_reset_line="${dim}resets ${reset}${white}${extra_reset}${reset}"
         rate_lines+="\n${extra_col}"
+        rate_lines+="\n${extra_reset_line}"
     fi
 fi
 
