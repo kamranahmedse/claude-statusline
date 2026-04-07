@@ -147,12 +147,14 @@ function run() {
   const statusLineConfig = {
     type: "command",
     command: `bash "${STATUSLINE_DEST}"`,
+    padding: 0,
   };
 
   if (
     settings.statusLine &&
     settings.statusLine.type === "command" &&
-    settings.statusLine.command === statusLineConfig.command
+    settings.statusLine.command === statusLineConfig.command &&
+    settings.statusLine.padding === 0
   ) {
     success("Settings already configured");
   } else {
