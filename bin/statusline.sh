@@ -291,7 +291,9 @@ if [ -n "$stdin_five_pct" ]; then
 fi
 
 # ── Fallback: API call (cached) ────────────────────────
-cache_file="/tmp/claude/statusline-usage-cache.json"
+_config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+_cache_id=$(printf "%s" "$_config_dir" | md5 2>/dev/null || printf "%s" "$_config_dir" | md5sum 2>/dev/null | cut -d' ' -f1)
+cache_file="/tmp/claude/statusline-usage-${_cache_id}.json"
 cache_max_age=60
 mkdir -p /tmp/claude
 
@@ -403,7 +405,7 @@ if [ "$extra_enabled" = "true" ] && [ -n "$usage_data" ]; then
 fi
 
 # ── Total cost (ccusage, cached) ───────────────────────
-cost_cache="/tmp/claude/statusline-cost-cache.txt"
+cost_cache="/tmp/claude/statusline-cost-${_cache_id}.txt"
 cost_cache_max_age=300
 total_cost=""
 
