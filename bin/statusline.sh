@@ -225,7 +225,7 @@ if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
         | sed 's/\\u001b\[[0-9;]*m//g; s/\\\\//g' \
         | grep -o 'local-command-stdout>Set model to[^<]*effort' \
         | tail -1 \
-        | grep -o '\(low\|medium\|high\|max\) effort' \
+        | grep -o '\(low\|medium\|xhigh\|high\|max\) effort' \
         | tail -1 \
         | awk '{print $1}')
 fi
@@ -284,7 +284,8 @@ if [ -n "$session_duration" ]; then
 fi
 line1+="${sep}"
 case "$effort" in
-    max)    line1+="${yellow}◉ ${effort}${reset}" ;;
+    max)    line1+="${yellow}✦ ${effort}${reset}" ;;
+    xhigh)  line1+="${pink}◉ ${effort}${reset}" ;;
     high)   line1+="${magenta}● ${effort}${reset}" ;;
     medium) line1+="${sapphire}◑ ${effort}${reset}" ;;
     low)    line1+="${dim}◔ ${effort}${reset}" ;;

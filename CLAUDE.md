@@ -33,7 +33,7 @@ Two files do all the work:
 1. Claude Code pipes JSON context to `statusline.sh` via stdin
 2. Script extracts model name, context usage, cwd, session start time
 3. Git branch/dirty state detected if in a repo
-4. Effort level detected from session transcript JSONL (supports max/high/medium/low), fallback to settings.json
+4. Effort level detected from session transcript JSONL (supports max/xhigh/high/medium/low), fallback to settings.json
 5. OAuth token retrieved (env var → macOS Keychain → credentials file → Linux secret-tool)
 6. Rate limit data fetched from API with file-based caching (default 120s, configurable via `--cache-ttl`)
 7. Formatted output with Catppuccin Mocha ANSI colors rendered to stdout
