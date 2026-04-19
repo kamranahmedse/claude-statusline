@@ -28,56 +28,6 @@ reset='\033[0m'
 
 sep=" ${dim}│${reset} "
 
-# ── Terminal width + right-align helper ────────────────
-term_width=""
-# Try parent process tty (works inside pipes)
-parent_tty=$(ps -o tty= -p $(ps -o ppid= -p $$) 2>/dev/null | tr -d ' ')
-if [ -n "$parent_tty" ] && [ "$parent_tty" != "??" ] && [ "$parent_tty" != "?" ]; then
-    term_width=$(stty size < "/dev/${parent_tty}" 2>/dev/null | awk '{print $2}')
-fi
-# Fallback to tput
-[ -z "$term_width" ] && term_width=$(tput cols 2>/dev/null)
-[ -z "$term_width" ] && term_width=120
-# Account for Claude Code's padding + buddy if enabled
-status_margin=6
-_settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
-if [ -f "$_settings" ]; then
-    buddy_flag=$(jq -r '.statusLineMargin // empty' "$_settings" 2>/dev/null)
-    [ "$buddy_flag" = "buddy" ] && status_margin=18
-fi
-term_width=$(( term_width - status_margin ))
-
-# Get visible display width (strip ANSI, use python3 for wcwidth, fallback wc)
-visible_width() {
-    local stripped
-    stripped=$(printf "%b" "$1" | sed $'s/\033\[[0-9;]*m//g')
-    local w
-    w=$(python3 -c "
-import unicodedata,sys
-s=sys.stdin.read().rstrip('\n')
-w=0
-for c in s:
-    eaw=unicodedata.east_asian_width(c)
-    if eaw in('W','F'):w+=2
-    elif unicodedata.category(c) in('Mn','Me','Cf'):pass
-    else:w+=1
-print(w)" <<< "$stripped" 2>/dev/null)
-    [ -z "$w" ] && w=${#stripped}
-    printf "%s" "$w"
-}
-
-# Build a line: left + space padding + right, filling terminal width
-align_lr() {
-    local left="$1" right="$2"
-    local left_w right_w spaces pad=""
-    left_w=$(visible_width "$left")
-    right_w=$(visible_width "$right")
-    spaces=$(( term_width - left_w - right_w ))
-    [ "$spaces" -lt 1 ] && spaces=1
-    printf -v pad "%${spaces}s" ""
-    printf "%b%s%b" "$left" "$pad" "$right"
-}
-
 # ── Helpers ─────────────────────────────────────────────
 color_for_pct() {
     local pct=$1
@@ -208,6 +158,9 @@ if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git_branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
 fi
 
+git_worktree=$(echo "$input" | jq -r '.workspace.git_worktree // empty')
+cc_version=$(echo "$input" | jq -r '.version // empty')
+
 session_duration=""
 session_start=$(echo "$input" | jq -r '.session.start_time // empty')
 if [ -n "$session_start" ] && [ "$session_start" != "null" ]; then
@@ -234,20 +187,28 @@ line1_left="${blue}${model_base}${reset}"
 [ -n "$model_ctx" ] && line1_left+=" ${blue_dim}(${model_ctx})${reset}"
 
 pink='\033[38;2;240;160;180m'
+pink_dim='\033[38;2;156;104;117m'
+green_dim='\033[38;2;85;120;85m'
 if [ "$pct_used" -ge 20 ]; then
     ctx_color="$pink"
+    ctx_color_dim="$pink_dim"
 else
-    ctx_color="$white_dim"
+    ctx_color="$green"
+    ctx_color_dim="$green_dim"
 fi
-ctx_filled=$(( pct_used * 15 / 100 ))
-ctx_empty=$(( 15 - ctx_filled ))
+ctx_filled=$(( pct_used * 10 / 100 ))
+ctx_empty=$(( 10 - ctx_filled ))
 ctx_bar="${ctx_color}"
 for ((i=0; i<ctx_filled; i++)); do ctx_bar+="█"; done
 ctx_bar+="${dim}"
 for ((i=0; i<ctx_empty; i++)); do ctx_bar+="░"; done
 ctx_bar+="${reset}"
 ctx_info='\033[38;2;115;115;118m'
-line1_right="${ctx_color}⚡${reset}${ctx_bar} ${ctx_color}${pct_used}%${reset} ${ctx_info}(${current_fmt}/${size_fmt})${reset}"
+line1_right="${ctx_color} ${reset}${ctx_bar} ${ctx_color}${pct_used}%${reset} ${ctx_color_dim}(${current_fmt}/${size_fmt})${reset}"
+if [ -n "$git_worktree" ]; then
+    line1_left+="${sep}"
+    line1_left+="${white_dim}"$'\xef\x86\xbb'" ${git_worktree}${reset}"
+fi
 if [ -n "$git_branch" ]; then
     line1_left+="${sep}"
     line1_left+="${white_dim}"$'\xef\x90\x98'" ${git_branch}${reset}"
@@ -378,13 +339,13 @@ fi
 # ── Rate limit lines ────────────────────────────────────
 line2_left=""
 line3=""
-bar_width=15
+bar_width=10
 
 if [ -n "$five_hour_pct" ]; then
     five_hour_reset=$(format_epoch_time "$five_hour_reset_epoch" "time")
     five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width" "$cyan")
 
-    line2_left+="${cyan}Session${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset}"
+    line2_left+="${cyan}5h${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset}"
     [ -n "$five_hour_reset" ] && line2_left+=" ${cyan_dim}󰑐 (${five_hour_reset})${reset}"
 fi
 
@@ -393,7 +354,7 @@ if [ -n "$seven_day_pct" ]; then
     seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width" "$magenta")
 
     [ -n "$line2_left" ] && line2_left+="${sep}"
-    line2_left+="${magenta}Weekly${reset} ${seven_day_bar} ${magenta}${seven_day_pct}%${reset}"
+    line2_left+="${magenta}7d${reset} ${seven_day_bar} ${magenta}${seven_day_pct}%${reset}"
     [ -n "$seven_day_reset" ] && line2_left+=" ${magenta_dim}󰑐 (${seven_day_reset})${reset}"
 fi
 
@@ -406,10 +367,12 @@ fi
 
 # ── Total cost (ccusage, cached) ───────────────────────
 cost_cache="/tmp/claude/statusline-cost-${_cache_id}.txt"
-cost_cache_max_age=300
+cost_cache_max_age=1800
 total_cost=""
 
 today_cost=""
+
+ccusage_query='(.daily[-1].totalCost // 0 | tostring) + ":" + (.totals.totalCost // 0 | tostring)'
 
 if command -v ccusage >/dev/null 2>&1; then
     cost_needs_refresh=true
@@ -420,12 +383,21 @@ if command -v ccusage >/dev/null 2>&1; then
         [ "$cost_age" -lt "$cost_cache_max_age" ] && cost_needs_refresh=false
     fi
 
-    # Refresh in background — never block statusline rendering
     if $cost_needs_refresh; then
-        (ccusage daily --json --offline 2>/dev/null | jq -r '
-            (.daily[-1].totalCost // 0 | tostring) + ":" +
-            (.totals.totalCost // 0 | tostring)
-        ' | awk -F: '{printf "%.2f:%.2f", $1, $2}' > "$cost_cache") &
+        if [ ! -f "$cost_cache" ]; then
+            # First miss: foreground with timeout so first render shows a value
+            ccusage_raw=$(perl -e 'alarm shift; exec @ARGV' 8 ccusage daily --json --offline 2>/dev/null)
+            if [ -n "$ccusage_raw" ]; then
+                printf "%s" "$ccusage_raw" \
+                    | jq -r "$ccusage_query" 2>/dev/null \
+                    | awk -F: '{printf "%.2f:%.2f", $1, $2}' > "$cost_cache" 2>/dev/null
+            fi
+        else
+            # Subsequent refresh: background, never block rendering
+            (ccusage daily --json --offline 2>/dev/null \
+                | jq -r "$ccusage_query" \
+                | awk -F: '{printf "%.2f:%.2f", $1, $2}' > "$cost_cache") &
+        fi
     fi
 
     # Always read from cache (may be stale on first run)
@@ -437,26 +409,38 @@ if command -v ccusage >/dev/null 2>&1; then
 fi
 
 # ── Output ──────────────────────────────────────────────
-# Line 1: left=model+branch+session+effort, right=context bar
-align_lr "$line1_left" "$line1_right"
+# Line 1: model | branch (diff) | session | context bar — all left-aligned
+line1="$line1_left${sep}$line1_right"
+printf "%b" "$line1"
 
-# Line 2: left=Session+Weekly, right=Today+All cost
-line2_right=""
-if [ -n "$today_cost" ] || [ -n "$total_cost" ]; then
-    [ -n "$today_cost" ] && line2_right+="${yellow}\$${today_cost}${reset}"
-    [ -n "$today_cost" ] && [ -n "$total_cost" ] && line2_right+=" ${white_dim}→${reset} "
-    [ -n "$total_cost" ] && line2_right+="${yellow}\$${total_cost}${reset}"
-fi
-
-if [ -n "$line2_left" ] || [ -n "$line2_right" ]; then
+# Line 2: 5h | 7d — all left-aligned
+if [ -n "$line2_left" ]; then
     printf "\n\n"
-    align_lr "$line2_left" "$line2_right"
+    printf "%b" "$line2_left"
 fi
 
-# Line 3: Extra (if enabled)
+# Line 3: $today → $total | Extra
+line3_cost=""
+if [ -n "$today_cost" ] || [ -n "$total_cost" ]; then
+    line3_cost+="${yellow}Cost${reset} "
+    [ -n "$today_cost" ] && line3_cost+="${yellow}\$${today_cost}${reset}"
+    [ -n "$today_cost" ] && [ -n "$total_cost" ] && line3_cost+=" ${white_dim}→${reset} "
+    [ -n "$total_cost" ] && line3_cost+="${yellow}\$${total_cost}${reset}"
+fi
+
+line3_combined="$line3_cost"
 if [ -n "$line3" ]; then
+    [ -n "$line3_combined" ] && line3_combined+="${sep}"
+    line3_combined+="$line3"
+fi
+if [ -n "$cc_version" ]; then
+    [ -n "$line3_combined" ] && line3_combined+="${sep}"
+    line3_combined+="${ctx_info}v${cc_version}${reset}"
+fi
+
+if [ -n "$line3_combined" ]; then
     printf "\n"
-    printf "%b" "$line3"
+    printf "%b" "$line3_combined"
 fi
 
 exit 0

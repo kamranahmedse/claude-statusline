@@ -40,17 +40,6 @@ brew install jq
 bun install -g ccusage
 ```
 
-## Configuration
-
-In your `settings.json` (`~/.claude/settings.json` or `$CLAUDE_CONFIG_DIR/settings.json`):
-
-```jsonc
-{
-  // Set to "buddy" if you have the companion enabled, omit otherwise
-  "statusLineMargin": "buddy"
-}
-```
-
 ## Uninstall
 
 ```bash
