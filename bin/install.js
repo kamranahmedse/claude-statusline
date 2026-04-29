@@ -4,9 +4,6 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
-const CLAUDE_DIR = path.join(os.homedir(), ".claude");
-const SETTINGS_FILE = path.join(CLAUDE_DIR, "settings.json");
-const STATUSLINE_DEST = path.join(CLAUDE_DIR, "statusline.sh");
 const STATUSLINE_SRC = path.resolve(__dirname, "statusline.sh");
 
 const blue = "\x1b[38;2;0;153;255m";
@@ -57,38 +54,55 @@ function checkDeps() {
   return missing;
 }
 
+function findClaudeDirs() {
+  if (process.env.CLAUDE_CONFIG_DIR) {
+    return [process.env.CLAUDE_CONFIG_DIR];
+  }
+  const home = os.homedir();
+  const dirs = fs
+    .readdirSync(home)
+    .filter((e) => e === ".claude" || e.startsWith(".claude-"))
+    .map((e) => path.join(home, e))
+    .filter((p) => fs.statSync(p).isDirectory());
+  return dirs.length ? dirs : [path.join(home, ".claude")];
+}
+
 function uninstall() {
   console.log();
   console.log(`  ${blue}Claude Line Uninstaller${reset}`);
   console.log(`  ${dim}───────────────────────${reset}`);
   console.log();
 
-  const backup = STATUSLINE_DEST + ".bak";
+  for (const CLAUDE_DIR of findClaudeDirs()) {
+    const SETTINGS_FILE = path.join(CLAUDE_DIR, "settings.json");
+    const STATUSLINE_DEST = path.join(CLAUDE_DIR, "statusline.sh");
+    const backup = STATUSLINE_DEST + ".bak";
 
-  if (fs.existsSync(backup)) {
-    fs.copyFileSync(backup, STATUSLINE_DEST);
-    fs.unlinkSync(backup);
-    success(`Restored previous statusline from ${dim}statusline.sh.bak${reset}`);
-  } else if (fs.existsSync(STATUSLINE_DEST)) {
-    fs.unlinkSync(STATUSLINE_DEST);
-    success(`Removed ${dim}statusline.sh${reset}`);
-  } else {
-    warn("No statusline found — nothing to remove");
-  }
+    if (fs.existsSync(backup)) {
+      fs.copyFileSync(backup, STATUSLINE_DEST);
+      fs.unlinkSync(backup);
+      success(`Restored previous statusline from ${dim}statusline.sh.bak${reset}`);
+    } else if (fs.existsSync(STATUSLINE_DEST)) {
+      fs.unlinkSync(STATUSLINE_DEST);
+      success(`Removed ${dim}statusline.sh${reset}`);
+    } else {
+      warn("No statusline found — nothing to remove");
+    }
 
-  if (fs.existsSync(SETTINGS_FILE)) {
-    try {
-      const settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
-      if (settings.statusLine) {
-        delete settings.statusLine;
-        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
-        success(`Removed statusLine from ${dim}settings.json${reset}`);
-      } else {
-        success("Settings already clean");
+    if (fs.existsSync(SETTINGS_FILE)) {
+      try {
+        const settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+        if (settings.statusLine) {
+          delete settings.statusLine;
+          fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
+          success(`Removed statusLine from ${dim}settings.json${reset}`);
+        } else {
+          success("Settings already clean");
+        }
+      } catch {
+        fail(`Could not parse ${SETTINGS_FILE} — fix it manually`);
+        process.exit(1);
       }
-    } catch {
-      fail(`Could not parse ${SETTINGS_FILE} — fix it manually`);
-      process.exit(1);
     }
   }
 
@@ -119,46 +133,56 @@ function run() {
   }
   success("Dependencies found (jq, curl, git)");
 
-  if (!fs.existsSync(CLAUDE_DIR)) {
-    fs.mkdirSync(CLAUDE_DIR, { recursive: true });
-    success(`Created ${CLAUDE_DIR}`);
+  const claudeDirs = findClaudeDirs();
+  if (claudeDirs.length > 1) {
+    log(`Found ${claudeDirs.length} Claude profiles — installing to all`);
   }
 
-  const backup = STATUSLINE_DEST + ".bak";
-  if (fs.existsSync(STATUSLINE_DEST)) {
-    fs.copyFileSync(STATUSLINE_DEST, backup);
-    warn(`Backed up existing statusline to ${dim}statusline.sh.bak${reset}`);
-  }
+  for (const CLAUDE_DIR of claudeDirs) {
+    const SETTINGS_FILE = path.join(CLAUDE_DIR, "settings.json");
+    const STATUSLINE_DEST = path.join(CLAUDE_DIR, "statusline.sh");
 
-  fs.copyFileSync(STATUSLINE_SRC, STATUSLINE_DEST);
-  fs.chmodSync(STATUSLINE_DEST, 0o755);
-  success(`Installed statusline to ${dim}${STATUSLINE_DEST}${reset}`);
-
-  let settings = {};
-  if (fs.existsSync(SETTINGS_FILE)) {
-    try {
-      settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
-    } catch {
-      fail(`Could not parse ${SETTINGS_FILE} — fix it manually`);
-      process.exit(1);
+    if (!fs.existsSync(CLAUDE_DIR)) {
+      fs.mkdirSync(CLAUDE_DIR, { recursive: true });
+      success(`Created ${CLAUDE_DIR}`);
     }
-  }
 
-  const statusLineConfig = {
-    type: "command",
-    command: 'bash "$HOME/.claude/statusline.sh"',
-  };
+    const backup = STATUSLINE_DEST + ".bak";
+    if (fs.existsSync(STATUSLINE_DEST)) {
+      fs.copyFileSync(STATUSLINE_DEST, backup);
+      warn(`Backed up existing statusline to ${dim}statusline.sh.bak${reset}`);
+    }
 
-  if (
-    settings.statusLine &&
-    settings.statusLine.type === "command" &&
-    settings.statusLine.command === statusLineConfig.command
-  ) {
-    success("Settings already configured");
-  } else {
-    settings.statusLine = statusLineConfig;
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
-    success(`Updated ${dim}settings.json${reset} with statusLine config`);
+    fs.copyFileSync(STATUSLINE_SRC, STATUSLINE_DEST);
+    fs.chmodSync(STATUSLINE_DEST, 0o755);
+    success(`Installed statusline to ${dim}${STATUSLINE_DEST}${reset}`);
+
+    let settings = {};
+    if (fs.existsSync(SETTINGS_FILE)) {
+      try {
+        settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+      } catch {
+        fail(`Could not parse ${SETTINGS_FILE} — fix it manually`);
+        process.exit(1);
+      }
+    }
+
+    const statusLineConfig = {
+      type: "command",
+      command: 'bash "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.sh"',
+    };
+
+    if (
+      settings.statusLine &&
+      settings.statusLine.type === "command" &&
+      settings.statusLine.command === statusLineConfig.command
+    ) {
+      success("Settings already configured");
+    } else {
+      settings.statusLine = statusLineConfig;
+      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
+      success(`Updated ${dim}settings.json${reset} with statusLine config`);
+    }
   }
 
   console.log();
