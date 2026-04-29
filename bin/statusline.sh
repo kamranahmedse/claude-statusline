@@ -124,8 +124,10 @@ else
     pct_used=0
 fi
 
+claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
 effort="default"
-settings_path="$HOME/.claude/settings.json"
+settings_path="${claude_dir}/settings.json"
 if [ -f "$settings_path" ]; then
     effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
 fi
@@ -236,7 +238,7 @@ if ! $has_stdin_rates; then
             fi
         fi
         if [ -z "$token" ] || [ "$token" = "null" ]; then
-            creds_file="${HOME}/.claude/.credentials.json"
+            creds_file="${claude_dir}/.credentials.json"
             if [ -f "$creds_file" ]; then
                 token=$(jq -r '.claudeAiOauth.accessToken // empty' "$creds_file" 2>/dev/null)
             fi
