@@ -1,7 +1,8 @@
 {
-  "name": "@kamranahmedse/claude-statusline",
-  "version": "1.0.6",
-  "description": "A status line for Claude Code CLI showing model, context usage, rate limits, and more",
+  "name": "claude-statusline-codex",
+  "version": "1.0.0",
+  "description": "A Claude Code statusline adapted for Codex subscription usage via CodexBar",
+  "private": true,
   "bin": {
     "claude-statusline": "./bin/install.js"
   },
@@ -9,8 +10,10 @@
     "claude",
     "claude-code",
     "statusline",
+    "codex",
+    "codexbar",
     "cli"
   ],
   "license": "MIT",
-  "author": "Kamran Ahmed"
+  "author": "Kamran Ahmed; Codex adaptation by QinZhehan"
 }
