@@ -2,6 +2,8 @@
 
 A Claude Code statusline adapted for Codex / ChatGPT subscription usage.
 
+![Codex statusline demo](./.github/demo.png)
+
 This is based on `nilbuild/claude-statusline` / `@kamranahmedse/claude-statusline`, with the usage display changed to prefer CodexBar's Codex subscription data.
 
 ## What It Shows
@@ -40,16 +42,16 @@ codex login
 
 ## Install
 
+From GitHub:
+
+```bash
+npx github:Qinzhehan52/claude-statusline
+```
+
 From this repository checkout:
 
 ```bash
 node ./bin/install.js
-```
-
-Or after publishing/packaging:
-
-```bash
-npx claude-statusline-codex
 ```
 
 The installer backs up your previous statusline if present, copies `bin/statusline.sh` to `~/.claude/statusline.sh`, and configures Claude Code settings.
