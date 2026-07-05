@@ -196,15 +196,29 @@ get_codex_usage() {
 }
 
 # ── Extract JSON data ───────────────────────────────────
-model_name=$(echo "$input" | jq -r '.model.display_name // "Claude"')
-codex_model=$(get_codex_model)
+model_display=$(echo "$input" | jq -r '.model.display_name // "Claude"')
+model_raw=$(printf "%s" "$model_display" | tr '[:upper:]' '[:lower:]')
+model_name="$model_display"
 
 size=$(echo "$input" | jq -r '.context_window.context_window_size // 200000')
 [ "$size" -eq 0 ] 2>/dev/null && size=200000
-if [ -n "$codex_model" ]; then
-    total_context_label=$(format_tokens "$size")
-    model_name="$codex_model (${total_context_label} Context)"
-fi
+
+# Prefer the backend model name exposed by a local Anthropic-compatible proxy.
+# Example: ANTHROPIC_DEFAULT_OPUS_MODEL_NAME=gpt-5.5 -> "gpt-5.5 via Opus".
+case "$model_raw" in
+    *opus*)
+        [ -n "$ANTHROPIC_DEFAULT_OPUS_MODEL_NAME" ] && model_name="$ANTHROPIC_DEFAULT_OPUS_MODEL_NAME via Opus"
+        ;;
+    *fable*)
+        [ -n "$ANTHROPIC_DEFAULT_FABLE_MODEL_NAME" ] && model_name="$ANTHROPIC_DEFAULT_FABLE_MODEL_NAME via Fable"
+        ;;
+    *sonnet*)
+        [ -n "$ANTHROPIC_DEFAULT_SONNET_MODEL_NAME" ] && model_name="$ANTHROPIC_DEFAULT_SONNET_MODEL_NAME via Sonnet"
+        ;;
+    *haiku*)
+        [ -n "$ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME" ] && model_name="$ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME via Haiku"
+        ;;
+esac
 
 input_tokens=$(echo "$input" | jq -r '.context_window.current_usage.input_tokens // 0')
 cache_create=$(echo "$input" | jq -r '.context_window.current_usage.cache_creation_input_tokens // 0')
