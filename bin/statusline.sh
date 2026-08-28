@@ -58,13 +58,13 @@ format_epoch_time() {
     local result=""
     case "$style" in
         time)
-            result=$(date -j -r "$epoch" +"%l:%M%p" 2>/dev/null)
-            [ -z "$result" ] && result=$(date -d "@$epoch" +"%l:%M%P" 2>/dev/null)
+            result=$(date -j -r "$epoch" +"%H:%M" 2>/dev/null)
+            [ -z "$result" ] && result=$(date -d "@$epoch" +"%H:%M" 2>/dev/null)
             result=$(echo "$result" | sed 's/^ //; s/\.//g' | tr '[:upper:]' '[:lower:]')
             ;;
         datetime)
-            result=$(date -j -r "$epoch" +"%b %-d, %l:%M%p" 2>/dev/null)
-            [ -z "$result" ] && result=$(date -d "@$epoch" +"%b %-d, %l:%M%P" 2>/dev/null)
+            result=$(date -j -r "$epoch" +"%b %-d, %H:%M" 2>/dev/null)
+            [ -z "$result" ] && result=$(date -d "@$epoch" +"%b %-d, %H:%M" 2>/dev/null)
             result=$(echo "$result" | sed 's/  / /g; s/^ //; s/\.//g' | tr '[:upper:]' '[:lower:]')
             ;;
         *)
@@ -107,34 +107,254 @@ iso_to_epoch() {
     return 1
 }
 
+skill_names_file="/tmp/claude/statusline-skill-names.txt"
+skill_names_max_age=300
+skill_names=""
+
+# Index every installed skill and plugin command name. Layouts vary (plain
+# skills, plugin skills under cache/<plugin>/<version>/, external_plugins, and
+# command-style skills defined as commands/<name>.md), so index by discovery
+# rather than by hardcoded paths. Cached because it costs a filesystem walk.
+load_skill_names() {
+    local age=999999 mtime now
+    if [ -f "$skill_names_file" ]; then
+        mtime=$(stat -c %Y "$skill_names_file" 2>/dev/null || stat -f %m "$skill_names_file" 2>/dev/null)
+        if [ -n "$mtime" ]; then
+            now=$(date +%s)
+            age=$(( now - mtime ))
+        fi
+    fi
+    if [ "$age" -lt "$skill_names_max_age" ]; then
+        skill_names=$(<"$skill_names_file")
+        return 0
+    fi
+
+    {
+        find "$HOME/.claude/skills" "$cwd/.claude/skills" -maxdepth 2 -name "SKILL.md" 2>/dev/null
+        find "$HOME/.claude/commands" "$cwd/.claude/commands" -maxdepth 2 -name "*.md" 2>/dev/null
+        find "$HOME/.claude/plugins" -maxdepth 8 \
+             \( -name "SKILL.md" -o -path "*/commands/*.md" \) 2>/dev/null
+    } | sed 's|/SKILL\.md$||; s|\.md$||; s|.*/||' | sort -u > "$skill_names_file" 2>/dev/null
+    skill_names=$(<"$skill_names_file")
+}
+
+# Same one-pass reasoning as the stdin read, for the usage API payload.
+# Returns non-zero when the payload is absent or does not carry a five_hour
+# object, which also replaces the separate `jq -e` validity checks.
+parse_usage_data() {
+    u_ok=""; u_five_pct=""; u_five_reset_iso=""; u_seven_pct=""
+    u_seven_reset_iso=""; u_extra_enabled="false"
+    u_extra_pct=""; u_extra_used=""; u_extra_limit=""
+    [ -n "$1" ] || return 1
+    {
+        read -r u_ok
+        read -r u_five_pct
+        read -r u_five_reset_iso
+        read -r u_seven_pct
+        read -r u_seven_reset_iso
+        read -r u_extra_enabled
+        read -r u_extra_pct
+        read -r u_extra_used
+        read -r u_extra_limit
+    } < <(printf '%s' "$1" | jq -r '
+        (if (.five_hour | type) == "object" then "ok" else "" end),
+        (.five_hour.utilization // 0 | round),
+        (.five_hour.resets_at // ""),
+        (.seven_day.utilization // 0 | round),
+        (.seven_day.resets_at // ""),
+        (.extra_usage.is_enabled // false),
+        (.extra_usage.utilization // 0 | round),
+        (.extra_usage.used_credits // 0 | round),
+        (.extra_usage.monthly_limit // 0 | round)
+    ' 2>/dev/null)
+    [ "$u_ok" = "ok" ]
+}
+
+# Keep first-invocation order, drop duplicates, and cap the list so a very
+# long session cannot grow the cache without bound.
+remember_skill() {
+    local n="$1" count
+    [ -n "$n" ] || return 0
+    case ",$skills_seen," in *",$n,"*) return 0 ;; esac
+    if [ -z "$skills_seen" ]; then
+        skills_seen="$n"
+    else
+        skills_seen="$skills_seen,$n"
+    fi
+    count=${skills_seen//[!,]/}
+    if [ ${#count} -ge 40 ]; then
+        skills_seen="${skills_seen#*,}"
+    fi
+}
+
+skill_exists() {
+    local n="${1##*:}"
+    [ -n "$n" ] || return 1
+    case $'\n'"$skill_names"$'\n' in
+        *$'\n'"$n"$'\n'*) return 0 ;;
+    esac
+    return 1
+}
+
 # ── Extract JSON data ───────────────────────────────────
-model_name=$(echo "$input" | jq -r '.model.display_name // "Claude"')
+# One jq pass for everything on stdin. The script reruns on every assistant
+# message, and each extra process costs more than the parsing itself. Fields
+# come out one per line, in the same order they are read below — keep the two
+# lists in sync. `// ""` rather than `// empty`, so a missing field still
+# emits its line and the rest do not shift up.
+{
+    read -r model_name
+    read -r size
+    read -r current
+    read -r effort
+    read -r cwd
+    read -r transcript
+    read -r session_id
+    read -r session_start
+    read -r stdin_five_pct
+    read -r stdin_five_reset
+    read -r stdin_seven_pct
+    read -r stdin_seven_reset
+} < <(echo "$input" | jq -r '
+    (.model.display_name // "Claude"),
+    (.context_window.context_window_size // 200000),
+    ((.context_window.current_usage.input_tokens // 0)
+     + (.context_window.current_usage.cache_creation_input_tokens // 0)
+     + (.context_window.current_usage.cache_read_input_tokens // 0)),
+    (.effort.level // ""),
+    (.cwd // ""),
+    (.transcript_path // ""),
+    (.session_id // ""),
+    (.session.start_time // ""),
+    (.rate_limits.five_hour.used_percentage // "" | if . == "" then "" else round end),
+    (.rate_limits.five_hour.resets_at // ""),
+    (.rate_limits.seven_day.used_percentage // "" | if . == "" then "" else round end),
+    (.rate_limits.seven_day.resets_at // "")
+' 2>/dev/null)
 
-size=$(echo "$input" | jq -r '.context_window.context_window_size // 200000')
-[ "$size" -eq 0 ] 2>/dev/null && size=200000
+[ -n "$model_name" ] || model_name="Claude"
+case "$size" in ''|*[!0-9]*) size=200000 ;; esac
+[ "$size" -eq 0 ] && size=200000
 
-input_tokens=$(echo "$input" | jq -r '.context_window.current_usage.input_tokens // 0')
-cache_create=$(echo "$input" | jq -r '.context_window.current_usage.cache_creation_input_tokens // 0')
-cache_read=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0')
-current=$(( input_tokens + cache_create + cache_read ))
+pct_used=$(( current * 100 / size ))
 
-if [ "$size" -gt 0 ]; then
-    pct_used=$(( current * 100 / size ))
-else
-    pct_used=0
-fi
-
-effort="default"
-settings_path="$HOME/.claude/settings.json"
-if [ -f "$settings_path" ]; then
-    effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
-fi
-
-# ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Effort ──
+# ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Effort │ Skill ──
 pct_color=$(color_for_pct "$pct_used")
-cwd=$(echo "$input" | jq -r '.cwd // ""')
 [ -z "$cwd" ] || [ "$cwd" = "null" ] && cwd=$(pwd)
 dirname=$(basename "$cwd")
+
+# ── Current skills (from transcript, incremental) ───────
+# Off unless asked for, so upgrading changes nobody's status line. Both
+# shapes are accepted: {"skills": true} and the {"blocks": [... "skills"]}
+# form used by mpiton/claude-statusline, so a config written for either works.
+skills_enabled=false
+skills_limit=3
+skills_config="$HOME/.claude/statusline.json"
+if [ -f "$skills_config" ]; then
+    {
+        read -r cfg_skills
+        read -r cfg_limit
+    } < <(jq -r '
+        (((.skills // false) == true) or ((.blocks // []) | index("skills") != null) | tostring),
+        (.skills_limit // 3 | if type == "number" and . >= 1 and . <= 10 then floor else 3 end)
+    ' "$skills_config" 2>/dev/null)
+    [ "$cfg_skills" = "true" ] && skills_enabled=true
+    case "$cfg_limit" in ''|*[!0-9]*) : ;; *) skills_limit=$cfg_limit ;; esac
+fi
+
+skills_seen=""
+skill_names_loaded=false
+
+# Only the bytes appended since the last render are read, so the cost does
+# not grow with the session. The cache holds that byte offset and the names
+# found so far. awk does the byte accounting and pre-filters, since transcript
+# lines run to 100KB+ and bash pattern matching over all of them costs more
+# than the whole rest of the script.
+if $skills_enabled && [ -n "$transcript" ] && [ -f "$transcript" ]; then
+    mkdir -p /tmp/claude 2>/dev/null
+    skills_cache="/tmp/claude/skills-${session_id:-unknown}"
+    skills_offset=0
+
+    if [ -f "$skills_cache" ] && [ ! -L "$skills_cache" ]; then
+        IFS=$'\t' read -r cached_offset skills_seen < "$skills_cache"
+        case "$cached_offset" in ''|*[!0-9]*) cached_offset=0 ;; esac
+        skills_offset=$cached_offset
+    fi
+
+    skills_size=$(stat -c %s "$transcript" 2>/dev/null || stat -f %z "$transcript" 2>/dev/null)
+    case "$skills_size" in ''|*[!0-9]*) skills_size=0 ;; esac
+
+    # Transcript replaced or truncated: what the offset pointed at is gone.
+    if [ "$skills_size" -lt "$skills_offset" ]; then
+        skills_offset=0
+        skills_seen=""
+    fi
+
+    if [ "$skills_size" -gt "$skills_offset" ]; then
+        while IFS= read -r scanned; do
+            case "$scanned" in
+                B*)
+                    skills_offset=$(( skills_offset + ${scanned#B} ))
+                    ;;
+                L*)
+                    line=${scanned#L}
+                    case "$line" in
+                        *'"name":"Skill"'*)
+                            # jq rather than a regex over the raw line: the
+                            # extraction must not depend on JSON key order.
+                            while IFS= read -r found_skill; do
+                                remember_skill "$found_skill"
+                            done < <(printf '%s' "$line" | jq -r '
+                                select(.isSidechain != true)
+                                | .message.content[]?
+                                | select(.type == "tool_use" and .name == "Skill")
+                                | .input.skill // empty' 2>/dev/null)
+                            ;;
+                    esac
+                    case "$line" in
+                        *'"content":"<command-name>/'*)
+                            if ! $skill_names_loaded; then
+                                load_skill_names
+                                skill_names_loaded=true
+                            fi
+                            found_skill="${line#*'"content":"<command-name>/'}"
+                            found_skill="${found_skill%%<*}"
+                            if [ -n "$found_skill" ] && skill_exists "$found_skill"; then
+                                remember_skill "$found_skill"
+                            fi
+                            ;;
+                    esac
+                    ;;
+            esac
+        done < <(tail -c "+$(( skills_offset + 1 ))" "$transcript" 2>/dev/null \
+            | awk -v chunk="$(( skills_size - skills_offset ))" '
+                function flush() { if (pending != "") { print pending; pending = "" } }
+                {
+                    # Flushing the previous record here keeps the final one
+                    # pending until END, where we know whether it was complete.
+                    flush()
+                    lastlen = length($0) + 1
+                    total += lastlen
+                    if ($0 ~ /"name":"Skill"/ || $0 ~ /"content":"<command-name>\//) pending = "L" $0
+                }
+                END {
+                    # A trailing newline the last record never had shows up as
+                    # total overshooting the chunk: that record is half-written,
+                    # so neither its matches nor its bytes are consumed.
+                    if (total <= chunk) {
+                        flush()
+                        print "B" total
+                    } else {
+                        print "B" (total - lastlen)
+                    }
+                }
+            ')
+
+        if [ ! -L "$skills_cache" ]; then
+            printf '%s\t%s\n' "$skills_offset" "$skills_seen" > "$skills_cache" 2>/dev/null
+        fi
+    fi
+fi
 
 git_branch=""
 git_dirty=""
@@ -146,7 +366,6 @@ if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 session_duration=""
-session_start=$(echo "$input" | jq -r '.session.start_time // empty')
 if [ -n "$session_start" ] && [ "$session_start" != "null" ]; then
     start_epoch=$(iso_to_epoch "$session_start")
     if [ -n "$start_epoch" ]; then
@@ -180,13 +399,33 @@ if [ -n "$session_duration" ]; then
     line1+="${sep}"
     line1+="${dim}⏱ ${reset}${white}${session_duration}${reset}"
 fi
-line1+="${sep}"
-case "$effort" in
-    high)   line1+="${magenta}● ${effort}${reset}" ;;
-    medium) line1+="${dim}◑ ${effort}${reset}" ;;
-    low)    line1+="${dim}◔ ${effort}${reset}" ;;
-    *)      line1+="${dim}◑ ${effort}${reset}" ;;
-esac
+if [ -n "$effort" ]; then
+    line1+="${sep}"
+    case "$effort" in
+        low)    line1+="${dim}○ ${effort}${reset}" ;;
+        medium) line1+="${dim}◔ ${effort}${reset}" ;;
+        high)   line1+="${magenta}◑ ${effort}${reset}" ;;
+        xhigh)  line1+="${magenta}◕ ${effort}${reset}" ;;
+        max)    line1+="${magenta}● ${effort}${reset}" ;;
+        *)      line1+="${dim}◌ ${effort}${reset}" ;;
+    esac
+fi
+if [ -n "$skills_seen" ]; then
+    IFS=',' read -r -a skills_list <<< "$skills_seen"
+    skills_total=${#skills_list[@]}
+    skills_from=0
+    [ "$skills_total" -gt "$skills_limit" ] && skills_from=$(( skills_total - skills_limit ))
+
+    skills_disp=""
+    for (( i = skills_from; i < skills_total; i++ )); do
+        [ -n "$skills_disp" ] && skills_disp+=","
+        skills_disp+="${skills_list[i]}"
+    done
+    [ "$skills_from" -gt 0 ] && skills_disp+=" ${dim}+${skills_from}${reset}${orange}"
+
+    line1+="${sep}"
+    line1+="${orange}✦ ${skills_disp}${reset}"
+fi
 
 # ── Rate limits from stdin (primary) ───────────────────
 has_stdin_rates=false
@@ -195,19 +434,17 @@ five_hour_reset_epoch=""
 seven_day_pct=""
 seven_day_reset_epoch=""
 
-stdin_five_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
 if [ -n "$stdin_five_pct" ]; then
     has_stdin_rates=true
-    five_hour_pct=$(printf "%.0f" "$stdin_five_pct")
-    five_hour_reset_epoch=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
-    seven_day_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty' | awk '{printf "%.0f", $1}')
-    seven_day_reset_epoch=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
+    five_hour_pct="$stdin_five_pct"
+    five_hour_reset_epoch="$stdin_five_reset"
+    seven_day_pct="$stdin_seven_pct"
+    seven_day_reset_epoch="$stdin_seven_reset"
 fi
 
 # ── Fallback: API call (cached) ────────────────────────
 cache_file="/tmp/claude/statusline-usage-cache.json"
 cache_max_age=60
-mkdir -p /tmp/claude
 
 usage_data=""
 extra_enabled="false"
@@ -258,31 +495,28 @@ if ! $has_stdin_rates; then
                 -H "anthropic-beta: oauth-2025-04-20" \
                 -H "User-Agent: claude-code/2.1.34" \
                 "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
-            if [ -n "$response" ] && echo "$response" | jq -e '.five_hour' >/dev/null 2>&1; then
+            if parse_usage_data "$response"; then
                 usage_data="$response"
                 echo "$response" > "$cache_file"
             fi
         fi
         if [ -z "$usage_data" ] && [ -f "$cache_file" ]; then
-            usage_data=$(cat "$cache_file" 2>/dev/null)
+            usage_data=$(<"$cache_file")
         fi
     fi
 
-    if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
-        five_hour_pct=$(echo "$usage_data" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
-        five_hour_reset_iso=$(echo "$usage_data" | jq -r '.five_hour.resets_at // empty')
-        five_hour_reset_epoch=$(iso_to_epoch "$five_hour_reset_iso")
-        seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
-        seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
-        seven_day_reset_epoch=$(iso_to_epoch "$seven_day_reset_iso")
-
-        extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
+    if parse_usage_data "$usage_data"; then
+        five_hour_pct="$u_five_pct"
+        five_hour_reset_epoch=$(iso_to_epoch "$u_five_reset_iso")
+        seven_day_pct="$u_seven_pct"
+        seven_day_reset_epoch=$(iso_to_epoch "$u_seven_reset_iso")
+        extra_enabled="$u_extra_enabled"
     fi
 else
     if [ -f "$cache_file" ]; then
-        usage_data=$(cat "$cache_file" 2>/dev/null)
-        if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
-            extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
+        usage_data=$(<"$cache_file")
+        if parse_usage_data "$usage_data"; then
+            extra_enabled="$u_extra_enabled"
         fi
     fi
 fi
@@ -313,9 +547,9 @@ if [ -n "$seven_day_pct" ]; then
 fi
 
 if [ "$extra_enabled" = "true" ] && [ -n "$usage_data" ]; then
-    extra_pct=$(echo "$usage_data" | jq -r '.extra_usage.utilization // 0' | awk '{printf "%.0f", $1}')
-    extra_used=$(echo "$usage_data" | jq -r '.extra_usage.used_credits // 0' | awk '{printf "%.2f", $1/100}')
-    extra_limit=$(echo "$usage_data" | jq -r '.extra_usage.monthly_limit // 0' | awk '{printf "%.2f", $1/100}')
+    extra_pct="$u_extra_pct"
+    printf -v extra_used '%d.%02d' "$(( u_extra_used / 100 ))" "$(( u_extra_used % 100 ))"
+    printf -v extra_limit '%d.%02d' "$(( u_extra_limit / 100 ))" "$(( u_extra_limit % 100 ))"
     extra_bar=$(build_bar "$extra_pct" "$bar_width")
     extra_pct_color=$(color_for_pct "$extra_pct")
 
